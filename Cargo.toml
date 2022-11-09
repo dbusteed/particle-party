@@ -1,0 +1,14 @@
+[package]
+name = "particle_party"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = "0.8.1"
+bevy_egui = "0.16.0"
+bevy_prototype_lyon = "0.6.0"
+heron = { version = "4.0.1", features = ["2d"] }
+# heron = { version = "4.0.1", features = ["2d", "debug-2d"] }
+rand = "0.8.5"
