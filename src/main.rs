@@ -1,16 +1,17 @@
-use bevy::prelude::*;
+use bevy::{core_pipeline::bloom::BloomSettings, prelude::*};
 use bevy_egui::{
     egui::{self, Color32, Slider},
     EguiContext, EguiPlugin,
 };
 use bevy_prototype_lyon::prelude as ly;
-use heron::prelude::*;
+use bevy_rapier2d::prelude::*;
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 
-const BG_COLOR: Color = Color::rgb(0.87, 0.87, 0.87);
+const BG_COLOR: Color = Color::rgb(0.06, 0.06, 0.06);
 const MIN_R: f32 = 10.0;
 
+#[derive(Resource)]
 struct Settings {
     shape_radius: f32,
     collision_radius: f32,
@@ -89,26 +90,28 @@ struct Particle(PType);
 #[derive(Component)]
 struct Border;
 
+#[derive(Resource)]
+struct ColorMap(HashMap<PType, Color>);
+
 struct Init;
 
-#[derive(PhysicsLayer)]
-enum Layers {
-    Particle,
-    Boundary,
-}
+#[derive(Component)]
+struct Acceleration(Vec3);
 
 fn main() {
     App::new()
         .add_event::<Init>()
         .insert_resource(ClearColor(BG_COLOR))
-        .insert_resource(WindowDescriptor {
-            title: "Particle Party".to_string(),
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            window: WindowDescriptor {
+                title: "Particle Party".to_string(),
+                ..default()
+            },
             ..default()
-        })
-        .add_plugins(DefaultPlugins)
+        }))
         .add_plugin(EguiPlugin)
         .add_plugin(ly::ShapePlugin)
-        .add_plugin(PhysicsPlugin::default())
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .insert_resource(Settings::default())
         .add_startup_system(init_setup)
         .add_system(init_particles)
@@ -118,15 +121,33 @@ fn main() {
         .run();
 }
 
-fn init_setup(mut commands: Commands, mut init_evt: EventWriter<Init>) {
-    commands.spawn_bundle(Camera2dBundle::default());
+fn init_setup(
+    mut commands: Commands,
+    mut rapier_config: ResMut<RapierConfiguration>,
+    mut init_evt: EventWriter<Init>,
+) {
+    commands.spawn((
+        Camera2dBundle {
+            camera: Camera {
+                hdr: true,
+                ..default()
+            },
+            ..default()
+        },
+        BloomSettings {
+            intensity: 4.0,
+            ..default()
+        },
+    ));
 
-    commands.insert_resource(HashMap::from([
+    rapier_config.gravity = Vec2::ZERO;
+
+    commands.insert_resource(ColorMap(HashMap::from([
         (PType::Red, Color::RED),
         (PType::Blue, Color::BLUE),
-        (PType::Green, Color::DARK_GREEN),
+        (PType::Green, Color::GREEN),
         (PType::Yellow, Color::YELLOW),
-    ]));
+    ])));
 
     init_evt.send(Init);
 }
@@ -136,7 +157,7 @@ fn init_particles(
     mut init_evt: EventReader<Init>,
     mut settings: ResMut<Settings>,
     mut windows: ResMut<Windows>,
-    colors: Res<HashMap<PType, Color>>,
+    colors: Res<ColorMap>,
     particles: Query<Entity, With<Particle>>,
     borders: Query<Entity, With<Border>>,
 ) {
@@ -154,8 +175,7 @@ fn init_particles(
         }
 
         commands
-            .spawn()
-            .insert_bundle(ly::GeometryBuilder::build_as(
+            .spawn(ly::GeometryBuilder::build_as(
                 &ly::shapes::Rectangle {
                     extents: Vec2::new(2., win_h),
                     origin: ly::shapes::RectangleOrigin::Center,
@@ -163,22 +183,13 @@ fn init_particles(
                 ly::DrawMode::Fill(ly::FillMode::color(BG_COLOR)),
                 Transform::default(),
             ))
-            .insert(RigidBody::Static)
-            .insert(CollisionShape::Cuboid {
-                half_extends: Vec3::new(1., win_h / 2., 0.),
-                border_radius: Some(0.),
-            })
-            .insert(
-                CollisionLayers::none()
-                    .with_group(Layers::Boundary)
-                    .with_masks(&[Layers::Particle]),
-            )
+            .insert(RigidBody::Fixed)
+            .insert(Collider::cuboid(1., win_h / 2.))
             .insert(Transform::from_xyz(-win_w / 2., 0., 0.))
             .insert(Border);
 
         commands
-            .spawn()
-            .insert_bundle(ly::GeometryBuilder::build_as(
+            .spawn(ly::GeometryBuilder::build_as(
                 &ly::shapes::Rectangle {
                     extents: Vec2::new(2., win_h),
                     origin: ly::shapes::RectangleOrigin::Center,
@@ -186,22 +197,13 @@ fn init_particles(
                 ly::DrawMode::Fill(ly::FillMode::color(BG_COLOR)),
                 Transform::default(),
             ))
-            .insert(RigidBody::Static)
-            .insert(CollisionShape::Cuboid {
-                half_extends: Vec3::new(1., win_h / 2., 0.),
-                border_radius: Some(0.),
-            })
-            .insert(
-                CollisionLayers::none()
-                    .with_group(Layers::Boundary)
-                    .with_masks(&[Layers::Particle]),
-            )
+            .insert(RigidBody::Fixed)
+            .insert(Collider::cuboid(1., win_h / 2.))
             .insert(Transform::from_xyz(win_w / 2., 0., 0.))
             .insert(Border);
 
         commands
-            .spawn()
-            .insert_bundle(ly::GeometryBuilder::build_as(
+            .spawn(ly::GeometryBuilder::build_as(
                 &ly::shapes::Rectangle {
                     extents: Vec2::new(win_w, 2.),
                     origin: ly::shapes::RectangleOrigin::Center,
@@ -209,22 +211,13 @@ fn init_particles(
                 ly::DrawMode::Fill(ly::FillMode::color(BG_COLOR)),
                 Transform::default(),
             ))
-            .insert(RigidBody::Static)
-            .insert(CollisionShape::Cuboid {
-                half_extends: Vec3::new(win_w / 2., 1., 0.),
-                border_radius: Some(0.),
-            })
-            .insert(
-                CollisionLayers::none()
-                    .with_group(Layers::Boundary)
-                    .with_masks(&[Layers::Particle]),
-            )
+            .insert(RigidBody::Fixed)
+            .insert(Collider::cuboid(win_w / 2., 1.))
             .insert(Transform::from_xyz(0., -win_h / 2., 0.))
             .insert(Border);
 
         commands
-            .spawn()
-            .insert_bundle(ly::GeometryBuilder::build_as(
+            .spawn(ly::GeometryBuilder::build_as(
                 &ly::shapes::Rectangle {
                     extents: Vec2::new(win_w, 2.),
                     origin: ly::shapes::RectangleOrigin::Center,
@@ -232,16 +225,8 @@ fn init_particles(
                 ly::DrawMode::Fill(ly::FillMode::color(BG_COLOR)),
                 Transform::default(),
             ))
-            .insert(RigidBody::Static)
-            .insert(CollisionShape::Cuboid {
-                half_extends: Vec3::new(win_w / 2., 1., 0.),
-                border_radius: Some(0.),
-            })
-            .insert(
-                CollisionLayers::none()
-                    .with_group(Layers::Boundary)
-                    .with_masks(&[Layers::Particle]),
-            )
+            .insert(RigidBody::Fixed)
+            .insert(Collider::cuboid(win_w / 2., 1.))
             .insert(Transform::from_xyz(0., win_h / 2., 0.))
             .insert(Border);
 
@@ -266,26 +251,18 @@ fn init_particles(
                 let y: f32 = thread_rng().gen_range((-win_h / 2. + 5.)..(win_h / 2. - 5.));
 
                 commands
-                    .spawn()
-                    .insert_bundle(ly::GeometryBuilder::build_as(
+                    .spawn(ly::GeometryBuilder::build_as(
                         &ly::shapes::Circle {
                             radius: settings.shape_radius,
                             center: Vec2::ZERO,
                         },
-                        ly::DrawMode::Fill(ly::FillMode::color(*colors.get(&ptype).unwrap())),
+                        ly::DrawMode::Fill(ly::FillMode::color(*colors.0.get(&ptype).unwrap())),
                         Transform::default(),
                     ))
                     .insert(RigidBody::Dynamic)
                     .insert(Velocity::default())
-                    .insert(Acceleration::default())
-                    .insert(CollisionShape::Sphere {
-                        radius: settings.collision_radius,
-                    })
-                    .insert(
-                        CollisionLayers::none()
-                            .with_group(Layers::Particle)
-                            .with_masks(&[Layers::Particle, Layers::Boundary]),
-                    )
+                    .insert(Acceleration(Vec3::ZERO))
+                    .insert(Collider::ball(settings.collision_radius))
                     .insert(Transform::from_xyz(x, y, 0.))
                     .insert(Particle(ptype));
             }
@@ -297,7 +274,7 @@ fn calculate_acceleration(
     settings: Res<Settings>,
     mut query: Query<(Entity, &Transform, &mut Acceleration, &Particle)>,
 ) {
-    let mut accel_map: HashMap<u32, Vec3> = HashMap::new();
+    let mut accel_map: HashMap<Entity, Vec3> = HashMap::new();
     for (ent, trans, _, part) in query.iter() {
         let mut accel = Vec3::ZERO;
         for (ent2, trans2, _, part2) in query.iter() {
@@ -332,18 +309,17 @@ fn calculate_acceleration(
                 accel += accel2 * r_vector_unit;
             }
         }
-
-        accel_map.insert(ent.id(), accel);
+        accel_map.insert(ent, accel);
     }
 
     for (ent, _, mut accel, _) in query.iter_mut() {
-        accel.linear = *accel_map.get(&ent.id()).unwrap();
+        accel.0 = *accel_map.get(&ent).unwrap();
     }
 }
 
 fn update_velocity(mut query: Query<(&mut Velocity, &Acceleration)>) {
     for (mut vel, acc) in query.iter_mut() {
-        vel.linear += acc.linear;
+        vel.linvel += Vec2::new(acc.0.x, acc.0.y);
     }
 }
 
@@ -354,7 +330,7 @@ fn ui_box(
 ) {
     egui::Window::new("").show(egui_context.ctx_mut(), |ui| {
         ui.add(
-            Slider::new(&mut settings.base_g, 0.0..=100.0)
+            Slider::new(&mut settings.base_g, 0.0..=500.0)
                 .text("Base Gravity")
                 .text_color(Color32::WHITE),
         );
